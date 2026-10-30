@@ -157,8 +157,21 @@ class ARIMA
     }
 
     // Step 4
-    double getRMSE(const vector<double> &predicted,
-                   const vector<double> &actual) const;
+    double getRMSE(const vector<double> &predicted,const vector<double> &actual,size_t actualidx)
+   {
+    double sum=0;
+    int count_n=0;
+       for (size_t i=actualidx;i<actualidx+predicted.size();i++)
+       {
+        if (i>=actual.size()) break;
+        double e=predicted[i-actualidx]-actual[i];
+        sum+=e*e;
+        count_n++;
+       }
+       if (count_n==0) return -1;
+       double ans=sum*(1.0/count_n);
+          return sqrt(ans);
+   }
 
     // Step 5 (improved)
     double testOneWindow(const vector<double> &data, int p, int trainEnd) const;
