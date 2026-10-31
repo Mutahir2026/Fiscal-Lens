@@ -10,10 +10,10 @@ bool loadCSV(const string &path, vector<string> &dates, vector<double> &prices)
 {
     ifstream file(path);
     if (!file.is_open())
-        return false; // file nahi mili
+        return false;
 
     string line;
-    getline(file, line); // pehli line (header) skip
+    getline(file, line);
 
     while (getline(file, line))
     {
@@ -21,12 +21,14 @@ bool loadCSV(const string &path, vector<string> &dates, vector<double> &prices)
             continue;
         stringstream ss(line);
         string date, priceStr;
-        getline(ss, date, ','); // this breakage can be done with the help of stringstream
+        getline(ss, date, ',');
         getline(ss, priceStr, ',');
 
         try
         {
-            double price = stod(priceStr); // string se double
+            double price = stod(priceStr);
+            if (price <= 0) // log(0 ya negative) se bachne ke liye
+                continue;
             dates.push_back(date);
             prices.push_back(price);
         }
@@ -35,48 +37,38 @@ bool loadCSV(const string &path, vector<string> &dates, vector<double> &prices)
             continue;
         }
     }
-    return true;
+    return !prices.empty(); // empty file pe false
 }
+
 class ARIMA
 {
-    // days ye batata hai ke har window mein kitne din aage predict karne hain. Default 30 hai,
-    //  matlab 700 din pe train karo to 701 se 730 tak ke 30 din predict honge aur unka RMSE nikalega.
-    // step ye batata hai ke agli window kitna aage khiskegi. Default 7 hai,
     // Step 1
-    void toLog(vector<double> &data)
+    void toLog(vector<double> &data) const
     {
         for (double &d : data)
-        {
             d = log(d);
-        }
     }
-    void toAntiLog(vector<double> &data)
+    void toAntiLog(vector<double> &data) const
     {
         for (double &d : data)
-        {
             d = exp(d);
-        }
     }
-    void toAntiLog(vector<double> &data, size_t start, size_t end)
+    void toAntiLog(vector<double> &data, size_t start, size_t end) const
     {
         end = min(end, data.size());
         for (size_t i = start; i < end; i++)
-        {
             data[i] = exp(data[i]);
-        }
     }
-    vector<double> makeStationary(vector<double> &data)
+    vector<double> makeStationary(vector<double> &data) const
     {
         toLog(data);
         vector<double> newData;
-        for (int i = 0; i < data.size() - 1; i++)
-        {
+        for (size_t i = 0; i + 1 < data.size(); i++) // underflow fix
             newData.push_back(data[i + 1] - data[i]);
-        }
         return newData;
     }
     // Step 2
-    vector<double> getCoefficients(const vector<double> &data, int p)
+    vector<double> getCoefficients(const vector<double> &data, int p)const
     {
         int n = data.size();
 
@@ -131,25 +123,24 @@ class ARIMA
     }
 
     // Step 3
-    vector<double> predictValues(const vector<double> &data, const vector<double> &coeffs, int days)
+    vector<double> predictValues(const vector<double> &data, const vector<double> &coeffs, int days) const
     {
         vector<double> predictedval;
+        if (coeffs.size() < 2 || data.size() < coeffs.size() - 1) // bounds check
+            return predictedval;
+
         vector<double> pseudo_data = data;
         int pseudo_data_handler = pseudo_data.size() - 1;
         int pseudo_days = 1;
         while (pseudo_days <= days)
         {
             double val = 0;
-            for (int i = 0; i < coeffs.size(); i++)
+            for (size_t i = 0; i < coeffs.size(); i++)
             {
                 if (i == 0)
-                {
                     val += coeffs[i];
-                }
                 else
-                {
                     val += pseudo_data[pseudo_data_handler--] * coeffs[i];
-                }
             }
             predictedval.push_back(val);
             pseudo_data.push_back(val);
@@ -160,24 +151,23 @@ class ARIMA
     }
 
     // Step 3.5
-    vector<double> integrateValues(const vector<double> &predicted, const vector<double> &original)
+    vector<double> integrateValues(const vector<double> &predicted, const vector<double> &original) const
     {
         vector<double> integrated_val;
+        if (predicted.empty() || original.empty()) // crash se bachne ke liye
+            return integrated_val;
+
         integrated_val.push_back(original.back() + predicted[0]);
-        for (int i = 1; i < predicted.size(); i++)
-        {
+        for (size_t i = 1; i < predicted.size(); i++)
             integrated_val.push_back(integrated_val.back() + predicted[i]);
-        }
         toAntiLog(integrated_val);
         return integrated_val;
     }
 
     // Step 4
-    double getRMSE(const vector<double> &predicted, vector<double> actual, size_t actualidx)
+    double getRMSE(const vector<double> &predicted, vector<double> actual, size_t actualidx) const
     {
-        // actual:logvalue
-        //actual vec ko & pass nahi kia qke actual hi change hojati hame srf is method k lie
-        //antilog ma karni value
+        // actual: log values (by-value, taaki caller ka vector na badle)
         size_t end = min(actualidx + predicted.size(), actual.size());
         if (actualidx >= end)
             return -1;
@@ -193,8 +183,25 @@ class ARIMA
         return sqrt(sum / (end - actualidx));
     }
 
-    // Step 5 (improved)
-    double testOneWindow(const vector<double> &data, int p, int trainEnd) const;
+    // Step 5
+    double testOneWindow(const vector<double> &data, int p, int trainEnd) const
+    {
+        if (trainEnd < 2 || (size_t)trainEnd >= data.size()) // invalid window
+            return -1;
+
+        vector<double> logAll = data;
+        toLog(logAll); // RMSE ke liye poora log vector
+
+        vector<double> train(data.begin(), data.begin() + trainEnd);
+        vector<double> diff = makeStationary(train); // train ab log ho gaya
+
+        vector<double> c = getCoefficients(diff, p);
+        vector<double> pred = predictValues(diff, c, days);
+        if (pred.empty())
+            return -1;
+        vector<double> integ = integrateValues(pred, train);
+        return getRMSE(integ, logAll, trainEnd);
+    }
     double testAllWindows(const vector<double> &data, int p) const;
     int findBestP(const vector<double> &data);
     double baselineRMSE(const vector<double> &data) const;
@@ -213,7 +220,7 @@ class ARIMA
     vector<double> history;
 
 public:
-    ARIMA(int maxP = 10, int days = 30, int step = 7, int startTrain = 700);
+    ARIMA(int maxP = 10, int days = 30, int step = 7, int startTrain = 700):maxP(maxP),days(days),step(step),startTrain(startTrain){}
     void trainModel(const vector<double> &data);
     vector<double> forecast(int days) const;
 };
