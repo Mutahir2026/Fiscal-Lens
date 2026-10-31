@@ -68,7 +68,7 @@ class ARIMA
         return newData;
     }
     // Step 2
-    vector<double> getCoefficients(const vector<double> &data, int p)const
+    vector<double> getCoefficients(const vector<double> &data, int p) const
     {
         int n = data.size();
 
@@ -202,12 +202,50 @@ class ARIMA
         vector<double> integ = integrateValues(pred, train);
         return getRMSE(integ, logAll, trainEnd);
     }
-    double testAllWindows(const vector<double> &data, int p) const;
-    int findBestP(const vector<double> &data);
+    double testAllWindows(const vector<double> &data, int p) const
+    {
+        double err = 0;
+        int window_count = 0;
+        for (size_t i = startTrain; i + days <= data.size(); i += step)
+        {
+            double temp = testOneWindow(data, p, i);
+            if (temp < 0)
+                continue;
+            err += temp;
+
+            window_count++;
+        }
+        if (window_count == 0)
+            return -1;
+        return err / window_count;
+    }
+    int findBestP(const vector<double> &data)
+    {
+        double Min = __DBL_MAX__;
+        int minP = -1;
+        for (int i = 1; i <= maxP; i++)
+        {
+            double temp = testAllWindows(data, i);
+            if (temp < 0)
+                continue;
+            if (temp < Min)
+            {
+                Min = temp;
+                minP = i;
+            }
+        }
+        // bestP = minP;
+        bestErr = (minP == -1) ? -1 : Min;
+        return minP;
+    }
     double baselineRMSE(const vector<double> &data) const;
 
-    int getBestP() const;
-    const vector<double> &getErrors() const; // errors[p-1] = avg RMSE of AR(p)
+    int getBestP() const
+    {
+        if (bestP==-1) return -1;
+        return bestP;
+    }
+    // errors[p-1] = avg RMSE of AR(p)
 
     int maxP;
     int days;
@@ -215,14 +253,28 @@ class ARIMA
     int startTrain;
 
     int bestP;
-    vector<double> errors;
+    double bestErr;
     vector<double> coeffs;
     vector<double> history;
 
 public:
-    ARIMA(int maxP = 10, int days = 30, int step = 7, int startTrain = 700):maxP(maxP),days(days),step(step),startTrain(startTrain){}
-    void trainModel(const vector<double> &data);
-    vector<double> forecast(int days) const;
+    ARIMA(int maxP = 10, int days = 30, int step = 7, int startTrain = 700) : maxP(maxP), days(days), step(step)
+    , startTrain(startTrain),bestP(-1),bestErr(-1) {}
+    void trainModel(const vector<double> &data)
+    {
+      bestP=findBestP(data);
+      coeffs=getCoefficients(data,bestP);
+    }
+    vector<double> forecast(int days)const
+    {
+      //1st day is referred as forecasted[0] and so on
+      vector<double> forecasted;
+      for (int i=1;i<=days;i++)
+      {
+        
+      }
+
+    }
 };
 int main()
 {
