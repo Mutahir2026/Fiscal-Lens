@@ -1,113 +1,134 @@
 #include <iostream>
 #include <vector>
+#include <cmath>
 #include <algorithm>
 using namespace std;
 
-struct TreeNode{
-    int featureIndex;   // which feature this node splits on
-    double threshold;   // go left if x[featureIndex] <= threshold
-    double prediction;  // mean of y in this node (valid for every node)
+const double MIN_GAIN              = 1e-4;  // ignore splits that only fit rounding noise
+
+struct TreeNode {
     bool isLeaf;
+    int featureIdx;     // which feature this node splits on
+    double threshold;   // the best Split Score given by a feature on this node
+    double prediction;  // mean of y of the samples that reached this node
     int nSamples;
-    TreeNode* left;     // val <= threshold
-    TreeNode* right;    // val > threshold
-    TreeNode() : featureIndex(-1), threshold(0), prediction(0), 
-            isLeaf(false), nSamples(0), left(nullptr), right(nullptr)  {}
+    TreeNode* left;          // value <= threshold
+    TreeNode* right;         // value >  threshold
+    TreeNode() : isLeaf(true), featureIdx(-1), threshold(0), prediction(0),
+             nSamples(0), left(nullptr), right(nullptr) {}
 };
 
 // Result of searching for the best question to ask at a node
-struct split {
+struct Split {
     bool found;
-    int featureIndex;
+    int featureIdx;
     double threshold;
-    double cost;   // combined SSE of left + right after the split
+    double cost;   // combined SSE (Sum of Squared Errors) of left + right after the split
     // total cost after splitting (lower = better)
 };
+
+// a new split must beat the best one by a tiny margin, 
+// so rounding noise cannot flip ties differently between the two search methods
+static bool improves(double cost, double best) {
+    return cost < best - 1e-12 * (1.0 + fabs(best));
+}
 
 /* ============================================================
    REGRESSION TREE
    X = table of inputs: X[i][j] = feature j of sample i
    y = list of answers: y[i]    = levy of sample i
    ============================================================ */
-class RegressionTree{
+class RegressionTree {
 private:
     TreeNode* root;
-    int maxDepth;         // tree may not grow deeper than this
+    int maxDepth;
     int minSamplesSplit;  // a node with fewer samples than this stays a leaf
-    int minSamplesLeaf;   // every child must keep at least this many samples
+    int minSamplesLeaf;
 
-    
+    // Recursive partitioning: greedy, locally best split, no backtracking.
+    // idx = indices of the rows that reached this node.
+    TreeNode* build(const vector<vector<double>>& X, const vector<double>& y, const vector<int>& idx, int depth) {
+        TreeNode* node = new TreeNode();
+        int n = idx.size();
+        node->nSamples = n;
+
+        // compute prediction and own error (SSE) of this node
+        double sum = 0, sumSq = 0;
+        for (int k = 0; k < n; k++) { sum += y[idx[k]]; sumSq += y[idx[k]] * y[idx[k]]; }
+        node->prediction = sum / n;
+        double ownError = sumSq - sum * sum / n;
+
+        if (depth >= maxDepth) return node;          // base cases
+        if (n < minSamplesSplit) return node;
+        if (ownError < 1e-12) return node;
+
+        Split s = findBestSplit(X, y, idx);
+        if (!s.found) return node;
+        if (s.cost >= ownError - MIN_GAIN) return node; // split barely helps
+
+        vector<int> leftIdx, rightIdx;
+        for (int k = 0; k < n; k++) {
+            int row = idx[k];
+            if (X[row][s.featureIdx] <= s.threshold) 
+                leftIdx.push_back(row);
+            else 
+                rightIdx.push_back(row);
+        }
+        node->isLeaf = false;
+        node->featureIdx = s.featureIdx;
+        node->threshold = s.threshold;
+        node->left = build(X, y, leftIdx, depth + 1);
+        node->right = build(X, y, rightIdx, depth + 1);
+        return node;
+    }
+
+    // Ek node ko kis Question ki basis pe split kary??
+    // SSE of a group = sum(y^2) - (sum(y))^2 / count. 
+    // And Cost of a split = SSE(left) + SSE(right); lower is better.
+    Split findBestSplit(const vector<vector<double>>& X, const vector<double>& y,
+                              const vector<int>& idx) {
+        
+        Split best{false, -1, 0, 1e300};        
+        int n = idx.size(), numFeatures = X[0].size();
+        
+        double totalSum = 0, totalSq = 0;
+        for (int k = 0; k < n; k++) { 
+            double v = y[idx[k]]; 
+            totalSum += v; 
+            totalSq += v * v; 
+        }
+
+        for (int j = 0; j < numFeatures; j++) {
+            vector<pair<double, double>> data;
+            for (int k = 0; k < n; k++) {
+                data.push_back({X[idx[k]][j], y[idx[k]]});
+            }
+            sort(data.begin(), data.end());
+
+            double sumLeft = 0, sqLeft = 0; // running totals...
+            for (int k = 0; k < n - 1; k++) {
+                sumLeft += data[k].second;
+                sqLeft += data[k].second * data[k].second;
+                
+                // cnt of samples/rows in left and right child.
+                int cL = k + 1, cR = n - cL;
+
+                if (data[k].first == data[k + 1].first) continue;     // cannot cut between equal values
+                if (cL < minSamplesLeaf || cR < minSamplesLeaf) continue;
+                
+                double sumRight = totalSum - sumLeft, sqRight = totalSq - sqLeft;
+                double cost = (sqLeft - sumLeft * sumLeft / cL) + (sqRight - sumRight * sumRight / cR);
+                
+                if (improves(cost, best.cost)) {
+                    best = {true, j, (data[k].first + data[k + 1].first) / 2.0, cost};
+                }
+            }
+        }
+        return best;
+    }
 };
-
-
-// struct Row { vector<double> x; double y; };  // why needed?
-
-// double mean(const vector<double>& ys) {
-//     double s = 0;
-//     for (double v : ys) s += v; 
-//     return s / ys.size();
-// }
-
-// double sse(const vector<double>& ys){
-//     if(ys.empty())
-//      return 0;
-//     double m = mean(ys);   // mean
-//     double a= 0;
-//     for(int i=0; i<ys.size(); i++){     
-//         a += (ys[i]-m)*(ys[i]-m);    // ye sum of squared hain
-//     }
-//     return a;
-// }
-// double splitscore(const vector<double>& x, const vector<double>& y, double t);// declare above as it is used in the func below
-
-
-// // Brute force, one feature: try a threshold between every pair of
-// // neighbouring distinct sorted values, keep the lowest combined SSE.
-// split bestThreshold(const vector<double>& x, const vector<double>& y) {
-//     split best = {false, 0, 0, sse(y)};   // must beat the unsplit SSE
-
-//     vector<double> sortedX = x;
-//     sort(sortedX.begin(), sortedX.end());
-
-//     for (int i = 0; i + 1 < sortedX.size(); i++) {
-//         if (sortedX[i] == sortedX[i + 1]) continue;   // no gap, no valid threshold
-//         double t = (sortedX[i] + sortedX[i + 1]) / 2.0;
-//         double score = splitscore(x, y, t);
-//         if (score < best.sse) {
-//             best.found = true;
-//             best.threshold = t;
-//             best.sse = score;
-//         }
-//     }
-//     return best;
-// }
-
-// double splitscore(const vector<double>& x, const vector<double>&y, double t){
-//     vector<double> l, r;
-//     for(int i=0; i<x.size(); i++){     
-//         if(x[i]<=t)    // we are comparing the x val with midpoint. is se we which side the y needs to go. remember, x is the value we decide WHHERE to split.
-//         l.push_back(y[i]); // and y is the predicted value.
-//     else
-//     r.push_back(y[i]);
-//     }
-//     return sse(l)+sse(r);
-// }
 
 
 int main() {
 
-// vector<double> x = {1, 2, 3, 10, 11, 12};
-// vector<double> y = {5, 5, 5, 20, 20, 20};
-// double t = 6.5;
-// vector<double> left, right;
-// loop over i: if x[i] <= t, push y[i] into left, else into right
-// cout << sse(left) + sse(right) << endl;   // expect 0   
-
 }
-
-/*
-sample   forecasted_price  affordability  imf_target |  levy (y)
-  0            85               30            10     |    20
-  1            65               48            10     |    10
-  2            72               40            11     |    15
-*/
