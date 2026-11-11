@@ -1,3 +1,5 @@
+#include <cstdio>
+#include <cctype>
 #include "LevyAdvisor.h"
 #include <iostream>
 #include <fstream>
