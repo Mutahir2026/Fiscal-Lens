@@ -3,7 +3,7 @@
 #include <string>
 using namespace std;
 
-const string CSV_PATH = "../data/levy_training.csv";
+const string CSV_PATH = "../data/processed/levy_training.csv";
 const bool PREDICT_MULTIPLIER = true;
 const bool USE_REQUIRED_LEVY_FEATURE = true;
 const bool RULE_FEATURES_ONLY = false;

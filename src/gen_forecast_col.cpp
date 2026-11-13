@@ -44,10 +44,10 @@ int main()
     }
     std::sort(brent_rows.begin(), brent_rows.end());
 
-    std::ifstream levy_file("data/levy_training.csv");
+    std::ifstream levy_file("data/processed/levy_training.csv");
     if (!levy_file)
     {
-        std::cerr << "Could not open data/levy_training.csv\n";
+        std::cerr << "Could not open data/processed/levy_training.csv\n";
         return 1;
     }
 
@@ -67,7 +67,7 @@ int main()
     }
     if (levy_file.bad())
     {
-        std::cerr << "Error reading data/levy_training.csv\n";
+        std::cerr << "Error reading data/processed/levy_training.csv\n";
         return 1;
     }
 

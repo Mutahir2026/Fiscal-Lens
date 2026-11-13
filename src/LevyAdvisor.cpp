@@ -10,26 +10,6 @@
 
 namespace {
 
-std::vector<std::string> splitLine(const std::string& line, char delim) {
-    std::vector<std::string> parts;
-    std::string cell;
-    std::stringstream ss(line);
-    while (std::getline(ss, cell, delim)) {
-        if (!cell.empty() && cell.back() == '\r') cell.pop_back();
-        parts.push_back(cell);
-    }
-    return parts;
-}
-
-int findCol(const std::vector<std::string>& header, const std::string& name) {
-    for (size_t i = 0; i < header.size(); i++) {
-        std::string h = header[i];
-        if (!h.empty() && h.back() == '\r') h.pop_back();
-        if (h == name) return static_cast<int>(i);
-    }
-    return -1;
-}
-
 bool isLeapYear(int y) {
     if (y % 400 == 0) return true;
     if (y % 100 == 0) return false;
@@ -80,291 +60,87 @@ std::string nextDay(const std::string& dateStr) {
     return std::string(buf);
 }
 
-bool loadPetrolBuildup(const std::string& path, std::vector<PetrolBuildupRow>& rows) {
-    std::ifstream file(path);
-    if (!file) {
-        std::string fallback = "data/raw/petrol_price_buildup_fortnightly.csv";
-        file.open(fallback);
-        if (!file) {
-            std::cout << "ERROR: cannot open petrol buildup file: " << path << "\n";
-            return false;
-        }
-    }
-    std::string line;
-    if (!std::getline(file, line)) {
-        std::cout << "ERROR: petrol buildup file is empty: " << path << "\n";
-        return false;
-    }
-    char delim = (line.find('\t') != std::string::npos) ? '\t' : ',';
-    std::vector<std::string> header = splitLine(line, delim);
-
-    int cStart = findCol(header, "period_start");
-    int cEnd = findCol(header, "period_end");
-    int cPetroleum = findCol(header, "petroleum_levy_pkr_l");
-    int cCarbon = findCol(header, "carbon_levy_pkr_l");
-    int cRetail = findCol(header, "retail_petrol_price_model");
-
-    if (cStart < 0 || cEnd < 0 || cPetroleum < 0 || cCarbon < 0 || cRetail < 0) {
-        std::cout << "ERROR: petrol buildup file missing required columns by name\n";
-        return false;
-    }
-
-    int maxIdx = std::max({cStart, cEnd, cPetroleum, cCarbon, cRetail});
-    while (std::getline(file, line)) {
-        if (line.empty()) continue;
-        std::vector<std::string> cells = splitLine(line, delim);
-        if (static_cast<int>(cells.size()) <= maxIdx) continue;
-        try {
-            PetrolBuildupRow r;
-            r.period_start = cells[cStart];
-            r.period_end = cells[cEnd];
-            r.petroleum_levy_pkr_l = std::stod(cells[cPetroleum]);
-            r.carbon_levy_pkr_l = std::stod(cells[cCarbon]);
-            r.retail_petrol_price_model = std::stod(cells[cRetail]);
-            rows.push_back(r);
-        } catch (const std::exception&) {
-            std::cout << "ERROR: invalid numerical value in petrol buildup line: " << line << "\n";
-            return false;
-        }
-    }
-    return !rows.empty();
+std::string nextFortnightStart(const std::string& lastStart) {
+    if (!isValidDateFormat(lastStart)) return "";
+    int y = std::stoi(lastStart.substr(0, 4));
+    int m = std::stoi(lastStart.substr(5, 2));
+    int d = std::stoi(lastStart.substr(8, 2));
+    if (d == 1) d = 16;
+    else if (d == 16) { d = 1; if (++m > 12) { m = 1; y++; } }
+    else return "";
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%04d-%02d-%02d", y, m, d);
+    return std::string(buf);
 }
 
-bool loadCpiIncome(const std::string& path, std::vector<CpiIncomeRow>& rows) {
-    std::ifstream file(path);
-    if (!file) {
-        std::string fallback = "data/raw/cpi_and_income_monthly.csv";
-        file.open(fallback);
-        if (!file) {
-            std::cout << "ERROR: cannot open CPI/income file: " << path << "\n";
-            return false;
-        }
-    }
-    std::string line;
-    if (!std::getline(file, line)) {
-        std::cout << "ERROR: CPI/income file is empty: " << path << "\n";
-        return false;
-    }
-    char delim = (line.find('\t') != std::string::npos) ? '\t' : ',';
-    std::vector<std::string> header = splitLine(line, delim);
-
-    int cMonth = findCol(header, "month");
-    int cCpi = findCol(header, "cpi_index_oct2023_100");
-    int cWage = findCol(header, "min_wage_pkr_month");
-
-    if (cMonth < 0 || cCpi < 0 || cWage < 0) {
-        std::cout << "ERROR: CPI/income file missing required columns by name\n";
-        return false;
-    }
-
-    int maxIdx = std::max({cMonth, cCpi, cWage});
-    while (std::getline(file, line)) {
-        if (line.empty()) continue;
-        std::vector<std::string> cells = splitLine(line, delim);
-        if (static_cast<int>(cells.size()) <= maxIdx) continue;
-        try {
-            CpiIncomeRow r;
-            r.month = cells[cMonth];
-            r.cpi_index_oct2023_100 = std::stod(cells[cCpi]);
-            r.min_wage_pkr_month = std::stod(cells[cWage]);
-            rows.push_back(r);
-        } catch (const std::exception&) {
-            std::cout << "ERROR: invalid numerical value in CPI/income line: " << line << "\n";
-            return false;
-        }
-    }
-    return !rows.empty();
-}
-
-bool LevyAdvisor::loadRawFiles(const std::string& buildupPath, const std::string& cpiPath) {
-    buildupRows.clear();
-    cpiRows.clear();
-    if (!loadPetrolBuildup(buildupPath, buildupRows)) return false;
-    if (!loadCpiIncome(cpiPath, cpiRows)) return false;
-    std::sort(buildupRows.begin(), buildupRows.end(), [](const PetrolBuildupRow& a, const PetrolBuildupRow& b) {
-        return a.period_start < b.period_start;
-    });
-    std::sort(cpiRows.begin(), cpiRows.end(), [](const CpiIncomeRow& a, const CpiIncomeRow& b) {
-        return a.month < b.month;
-    });
-    return true;
-}
-
-std::string LevyAdvisor::getLivePeriodStart() const {
-    if (buildupRows.empty()) return "";
-    return nextDay(buildupRows.back().period_end);
-}
-
-bool LevyAdvisor::buildRow(const std::string& periodStart,
-                           double crudeForecast,
-                           const Dataset& ds,
-                           bool isLive,
-                           std::vector<double>& featureRow,
+bool LevyAdvisor::buildRow(const std::string& periodStart, double crudeForecast, const Dataset& ds,
+                           bool isLive, std::vector<double>& featureRow,
                            AssembledInputs& inputs) const {
-    inputs.periodStart = periodStart;
-
-    // 1. forecast_crude_price
-    inputs.forecast_crude_price = crudeForecast;
-    inputs.crude_label = isLive ? "CALCULATED" : "CARRIED";
-    std::ostringstream crudeOss;
-    crudeOss << std::fixed << std::setprecision(3) << crudeForecast;
-    inputs.crude_detail = isLive ? ("user argument --crude " + crudeOss.str())
-                                 : ("stored in levy_training.csv for " + periodStart);
-
-    // 2. retail_petrol_price & current_levy
-    int foundBuildup = -1;
-    for (int i = static_cast<int>(buildupRows.size()) - 1; i >= 0; i--) {
-        if (buildupRows[i].period_end < periodStart) {
-            foundBuildup = i;
-            break;
-        }
-    }
-    if (foundBuildup < 0) {
-        std::cout << "ERROR: no build-up period found with period_end < " << periodStart << "\n";
-        return false;
-    }
-    const auto& bRow = buildupRows[foundBuildup];
-    inputs.retail_petrol_price = bRow.retail_petrol_price_model;
-    inputs.retail_label = "CARRIED";
-    inputs.retail_detail = "latest build-up period " + bRow.period_start + " to " + bRow.period_end;
-
-    inputs.current_levy = bRow.petroleum_levy_pkr_l + bRow.carbon_levy_pkr_l;
-    inputs.current_levy_label = "CALCULATED";
-    std::ostringstream clOss;
-    clOss << std::fixed << std::setprecision(3)
-          << "petroleum " << bRow.petroleum_levy_pkr_l << " + carbon " << bRow.carbon_levy_pkr_l;
-    inputs.current_levy_detail = clOss.str();
-
-    // 3. min_wage and cpi_index
-    std::string targetMonth = periodStart.substr(0, 7);
-    int foundCpi = -1;
-    for (int i = 0; i < static_cast<int>(cpiRows.size()); i++) {
-        if (cpiRows[i].month == targetMonth) {
-            foundCpi = i;
-            break;
-        }
-    }
-    bool carriedLatestCpi = false;
-    if (foundCpi < 0) {
-        if (cpiRows.empty()) {
-            std::cout << "ERROR: CPI rows empty\n";
-            return false;
-        }
-        foundCpi = static_cast<int>(cpiRows.size()) - 1;
-        carriedLatestCpi = true;
-    }
-    const auto& cRow = cpiRows[foundCpi];
-    inputs.min_wage_pkr_month = cRow.min_wage_pkr_month;
-    inputs.min_wage_label = "CARRIED";
-    inputs.min_wage_detail = (carriedLatestCpi ? "latest available month " : "month ") + cRow.month;
-
-    inputs.cpi_index_oct2023_100 = cRow.cpi_index_oct2023_100;
-    inputs.cpi_label = "CARRIED";
-    inputs.cpi_detail = (carriedLatestCpi ? "latest available month " : "month ") + cRow.month;
-
-    // 4. affordability_index = min_wage_pkr_month / (40 * retail_petrol_price) * (100 / cpi_index_oct2023_100) * 10
-    if (inputs.retail_petrol_price <= 0 || inputs.cpi_index_oct2023_100 <= 0) {
-        std::cout << "ERROR: non-positive retail price or CPI index for affordability formula\n";
-        return false;
-    }
-    inputs.affordability_index = (inputs.min_wage_pkr_month / (40.0 * inputs.retail_petrol_price)) *
-                                 (100.0 / inputs.cpi_index_oct2023_100) * 10.0;
-    inputs.affordability_label = "CALCULATED";
-
-    // 5. levy_revenue_target_pkr_bn, levied_volume_bn_litres, fiscal_gap_pkr_bn
     int carryRow = -1;
     if (isLive) {
-        if (ds.period_start.empty()) {
-            std::cout << "ERROR: dataset empty for live carry\n";
-            return false;
-        }
-        carryRow = static_cast<int>(ds.period_start.size()) - 1;
+        if (!ds.period_start.empty()) carryRow = static_cast<int>(ds.period_start.size()) - 1;
     } else {
-        for (int i = static_cast<int>(ds.period_start.size()) - 1; i >= 0; i--) {
-            if (ds.period_start[i] < periodStart) {
-                carryRow = i;
-                break;
-            }
-        }
-        if (carryRow < 0) {
-            std::cout << "ERROR: no earlier row to carry from for date " << periodStart << "\n";
-            return false;
-        }
+        for (int i = static_cast<int>(ds.period_start.size()) - 1; i >= 0; i--)
+            if (ds.period_start[i] < periodStart) { carryRow = i; break; }
     }
-
-    int idxTarget = -1, idxVolume = -1, idxFiscalGap = -1;
-    for (size_t j = 0; j < ds.featureNames.size(); j++) {
-        if (ds.featureNames[j] == "levy_revenue_target_pkr_bn") idxTarget = static_cast<int>(j);
-        else if (ds.featureNames[j] == "levied_volume_bn_litres") idxVolume = static_cast<int>(j);
-        else if (ds.featureNames[j] == "fiscal_gap_pkr_bn") idxFiscalGap = static_cast<int>(j);
-    }
-    if (idxTarget < 0 || idxVolume < 0 || idxFiscalGap < 0) {
-        std::cout << "ERROR: dataset missing required feature columns (target/volume/fiscal_gap)\n";
+    if (carryRow < 0) {
+        std::cout << "ERROR: no earlier row to carry from for " << periodStart << "\n";
         return false;
     }
 
-    inputs.levy_revenue_target_pkr_bn = ds.X[carryRow][idxTarget];
-    inputs.target_label = "CARRIED";
-    inputs.target_detail = "from period " + ds.period_start[carryRow];
+    auto col = [&](const std::string& name) {
+        for (size_t j = 0; j < ds.featureNames.size(); j++)
+            if (ds.featureNames[j] == name) return static_cast<int>(j);
+        return -1;
+    };
+    int iCrude = col("forecast_crude_price"), iTarget = col("levy_revenue_target_pkr_bn"),
+        iVolume = col("levied_volume_bn_litres"), iRetail = col("retail_petrol_price"),
+        iLevy = col("current_levy"), iAfford = col("affordability_index"),
+        iGap = col("fiscal_gap_pkr_bn"), iReq = col("required_levy");
+    if (iCrude < 0 || iTarget < 0 || iVolume < 0) {
+        std::cout << "ERROR: dataset missing crude/target/volume feature columns\n";
+        return false;
+    }
 
-    inputs.levied_volume_bn_litres = ds.X[carryRow][idxVolume];
-    inputs.volume_label = "CARRIED";
-    inputs.volume_detail = "from period " + ds.period_start[carryRow];
+    const std::vector<double>& src = ds.X[carryRow];
+    auto get = [&](int i) { return i >= 0 ? src[i] : 0.0; };
 
-    inputs.fiscal_gap_pkr_bn = ds.X[carryRow][idxFiscalGap];
-    inputs.fiscal_gap_label = "CARRIED";
-    inputs.fiscal_gap_detail = "from period " + ds.period_start[carryRow];
-
-    // 6. required_levy = target / volume
+    inputs.periodStart = periodStart;
+    inputs.carryPeriod = ds.period_start[carryRow];
+    inputs.forecast_crude_price = crudeForecast;
+    inputs.crude_detail = isLive ? "user argument --crude" : "stored in levy_training.csv";
+    inputs.retail_petrol_price = get(iRetail);
+    inputs.current_levy = get(iLevy);
+    inputs.affordability_index = get(iAfford);
+    inputs.levy_revenue_target_pkr_bn = src[iTarget];
+    inputs.levied_volume_bn_litres = src[iVolume];
+    inputs.fiscal_gap_pkr_bn = get(iGap);
     if (inputs.levied_volume_bn_litres <= 0) {
         std::cout << "ERROR: non-positive volume for required_levy\n";
         return false;
     }
     inputs.required_levy = inputs.levy_revenue_target_pkr_bn / inputs.levied_volume_bn_litres;
-    inputs.required_levy_label = "CALCULATED";
 
-    // 7. Order the values by Dataset.featureNames
-    featureRow.clear();
-    for (const std::string& name : ds.featureNames) {
-        if (name == "forecast_crude_price") featureRow.push_back(inputs.forecast_crude_price);
-        else if (name == "affordability_index") featureRow.push_back(inputs.affordability_index);
-        else if (name == "levy_revenue_target_pkr_bn") featureRow.push_back(inputs.levy_revenue_target_pkr_bn);
-        else if (name == "fiscal_gap_pkr_bn") featureRow.push_back(inputs.fiscal_gap_pkr_bn);
-        else if (name == "current_levy") featureRow.push_back(inputs.current_levy);
-        else if (name == "retail_petrol_price") featureRow.push_back(inputs.retail_petrol_price);
-        else if (name == "levied_volume_bn_litres") featureRow.push_back(inputs.levied_volume_bn_litres);
-        else if (name == "required_levy") featureRow.push_back(inputs.required_levy);
-        else {
-            std::cout << "ERROR: unknown feature name in ds.featureNames: " << name << "\n";
-            return false;
-        }
-    }
-
+    featureRow = src;
+    featureRow[iCrude] = crudeForecast;
+    if (iReq >= 0) featureRow[iReq] = inputs.required_levy;
     return true;
 }
 
 static void printInputs(const AssembledInputs& in) {
-    std::cout << "INPUTS:\n";
-    std::cout << "  forecast_crude_price:        " << std::setw(8) << in.forecast_crude_price
-              << "  [" << in.crude_label << "] (" << in.crude_detail << ")\n";
-    std::cout << "  retail_petrol_price:         " << std::setw(8) << in.retail_petrol_price
-              << "  [" << in.retail_label << "] (" << in.retail_detail << ")\n";
-    std::cout << "  current_levy:                " << std::setw(8) << in.current_levy
-              << "  [" << in.current_levy_label << "] (" << in.current_levy_detail << ")\n";
-    std::cout << "  min_wage_pkr_month:          " << std::setw(8) << in.min_wage_pkr_month
-              << "  [" << in.min_wage_label << "] (" << in.min_wage_detail << ")\n";
-    std::cout << "  cpi_index_oct2023_100:       " << std::setw(8) << in.cpi_index_oct2023_100
-              << "  [" << in.cpi_label << "] (" << in.cpi_detail << ")\n";
-    std::cout << "  affordability_index:         " << std::setw(8) << in.affordability_index
-              << "  [" << in.affordability_label << "] (formula: wage / (40 * retail) * (100 / cpi) * 10)\n";
-    std::cout << "  levy_revenue_target_pkr_bn:  " << std::setw(8) << in.levy_revenue_target_pkr_bn
-              << "  [" << in.target_label << "] (" << in.target_detail << ")\n";
-    std::cout << "  levied_volume_bn_litres:     " << std::setw(8) << in.levied_volume_bn_litres
-              << "  [" << in.volume_label << "] (" << in.volume_detail << ")\n";
-    std::cout << "  fiscal_gap_pkr_bn:           " << std::setw(8) << in.fiscal_gap_pkr_bn
-              << "  [" << in.fiscal_gap_label << "] (" << in.fiscal_gap_detail << ")\n";
-    std::cout << "  required_levy:               " << std::setw(8) << in.required_levy
-              << "  [" << in.required_levy_label << "] (target / volume)\n";
+    auto line = [](const char* name, double v, const std::string& note) {
+        std::cout << "  " << std::left << std::setw(28) << name << std::right
+                  << std::setw(9) << v << "  " << note << "\n";
+    };
+    std::cout << "INPUTS (carried from period " << in.carryPeriod << " unless noted):\n";
+    line("forecast_crude_price", in.forecast_crude_price, "[INPUT] " + in.crude_detail);
+    line("retail_petrol_price", in.retail_petrol_price, "[CARRIED]");
+    line("current_levy", in.current_levy, "[CARRIED]");
+    line("affordability_index", in.affordability_index, "[CARRIED]");
+    line("levy_revenue_target_pkr_bn", in.levy_revenue_target_pkr_bn, "[CARRIED]");
+    line("levied_volume_bn_litres", in.levied_volume_bn_litres, "[CARRIED]");
+    line("fiscal_gap_pkr_bn", in.fiscal_gap_pkr_bn, "[CARRIED]");
+    line("required_levy", in.required_levy, "[CALCULATED] target / volume");
 }
 
 int runLiveMode(double crudePrice) {
@@ -376,9 +152,8 @@ int runLiveMode(double crudePrice) {
     }
 
     LevyAdvisor advisor;
-    if (!advisor.loadRawFiles()) return 1;
 
-    std::string periodStart = advisor.getLivePeriodStart();
+    std::string periodStart = nextFortnightStart(ds.period_start.back());
     if (periodStart.empty()) {
         std::cout << "ERROR: cannot determine live period start.\n";
         return 1;
@@ -467,7 +242,6 @@ int runBacktestMode(const std::string& targetDate) {
     double storedScale = ds.scale[targetIndex];
 
     LevyAdvisor advisor;
-    if (!advisor.loadRawFiles()) return 1;
 
     std::vector<double> featureRow;
     AssembledInputs inputs;
@@ -503,7 +277,7 @@ int runBacktestMode(const std::string& targetDate) {
 
     std::cout << "\nEVALUATION VS STORED ROW (" << targetDate << "):\n";
     std::cout << "  Stored crude:                " << storedCrude << " USD/bbl\n";
-    std::cout << "  Stored retail price:         " << inputs.retail_petrol_price << " PKR/litre\n";
+    std::cout << "  Retail price used (carried): " << inputs.retail_petrol_price << " PKR/litre\n";
     std::cout << "  Stored current_levy:         " << storedCurrentLevy << " PKR/litre\n";
     std::cout << "  Stored required_levy:        " << storedScale << " PKR/litre\n";
     std::cout << "  Stored levy_value:           " << storedLevy << " PKR/litre (band: " << bandName(bandOf(storedLevy)) << ")\n";
