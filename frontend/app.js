@@ -336,6 +336,7 @@ async function runForecast() {
   show('chartProgress', true); show('forecastPlot', false); show('forecastLegend', false); show('chartIdle', false);
   show('modelInfo', false);
   message('runSummary', 'Loading inputs…');
+  message('accuracyNote', 'Waiting for forecast evaluation…');
   for (const id of ['statMape', 'statRmse', 'statMae', 'statOrder', 'statDiff', 'statNext']) message(id, '—');
   try {
     // DEBUG: Brent never waits for or requests levy_training.csv.
@@ -346,19 +347,29 @@ async function runForecast() {
     const series = selectedSeries();
     const horizon = Number($('forecastHorizon')?.value || 12);
     if (!Number.isInteger(horizon) || horizon < 1 || horizon > 365) throw new Error('Select a forecast window from 1 to 365.');
-    const api = await backend(['arimaMean']);
+    const api = await backend(['arimaReport']);
     progress('forecastSteps', 'Calculating C++ forecast…');
     message('runSummary', 'Calculating ' + series.label + '…');
     await paint();
-    const mean = Number(await api.arimaMean(series.values, horizon));
+    const result = await api.arimaReport(series.values, horizon);
+    if (!result.ok) throw new Error(result.error || 'ARIMA evaluation failed.');
+    const mean = Number(result.mean);
     if (!Number.isFinite(mean) || mean <= 0) throw new Error('C++ returned no valid forecast. Check the model’s minimum training length and the input data.');
     lastForecast = { series, horizon, mean };
     drawForecast(series, horizon, mean);
     show('forecastPlot', true);
     message('forecastUnit', series.unit);
     message('runSummary', series.label + ': mean of the next ' + horizon + ' observations = ' + number(mean) + ' ' + series.unit + '. One observation = one ' + series.period + '.');
-    message('accuracyNote', 'The arimaMean bridge does not return held-out accuracy or the selected model order.');
-  } catch (error) { reportError('runSummary', error); }
+    message('statMape', number(result.mape) + '%');
+    message('statRmse', number(result.rmse));
+    message('statMae', number(result.mae));
+    message('statOrder', result.p);
+    message('statDiff', result.d);
+    message('statNext', number(result.next));
+    message('modelNote', 'Future forecast fitted on all ' + series.values.length + ' observations. Next observation: ' + series.unit + '.');
+    show('modelInfo', true);
+    message('accuracyNote', series.label + ': final ' + result.testCount + ' observations held out; fitted and selected p=' + result.evaluationP + ' using only the preceding ' + result.trainCount + '. MAPE is a percentage; RMSE and MAE are in ' + series.unit + '. Lower is better.');
+  } catch (error) { reportError('runSummary', error); message('accuracyNote', 'Evaluation unavailable: ' + error.message); }
   finally { show('chartProgress', false); setBusy(false, 'forecastPanel'); }
 }
 async function runLevy() {

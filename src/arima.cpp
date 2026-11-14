@@ -329,3 +329,67 @@ int main()
     return 0;
 }
 #endif
+ArimaResult forecastWithEvaluation(const std::vector<double>& prices, int horizon) {
+    ArimaResult result;
+    if (horizon < 1 || horizon > 365) {
+        result.error = "Forecast horizon must be between 1 and 365 observations.";
+        return result;
+    }
+    // Order selection needs at least one validation window inside the training prefix.
+    if (prices.size() < static_cast<size_t>(MIN_TRAIN + 2 * horizon)) {
+        result.error = "Insufficient history for a separate chronological holdout and model selection.";
+        return result;
+    }
+    for (double price : prices) {
+        if (!std::isfinite(price) || price <= 0) {
+            result.error = "ARIMA requires finite, positive prices.";
+            return result;
+        }
+    }
+    result.testCount = horizon;
+    result.trainCount = static_cast<int>(prices.size()) - horizon;
+    std::vector<double> train(prices.begin(), prices.begin() + result.trainCount);
+    ARIMA evaluation(10, horizon, 7, MIN_TRAIN);
+    evaluation.trainModel(train);
+    const auto heldOut = evaluation.forecast(horizon);
+    if (heldOut.size() != static_cast<size_t>(horizon)) {
+        result.error = "ARIMA could not fit the holdout evaluation model.";
+        return result;
+    }
+    double squared = 0, absolute = 0, percentage = 0;
+    for (int i = 0; i < horizon; ++i) {
+        if (!std::isfinite(heldOut[i]) || heldOut[i] <= 0) {
+            result.error = "ARIMA returned an invalid holdout prediction.";
+            return result;
+        }
+        const double actual = prices[result.trainCount + i];
+        const double error = heldOut[i] - actual;
+        squared += error * error;
+        absolute += std::abs(error);
+        percentage += std::abs(error) / actual;
+    }
+    result.rmse = std::sqrt(squared / horizon);
+    result.mae = absolute / horizon;
+    result.mape = 100 * percentage / horizon;
+    result.evaluationP = evaluation.getBestP();
+
+    // Refit on all known observations for the future forecast only after evaluation.
+    ARIMA finalModel(10, horizon, 7, MIN_TRAIN);
+    finalModel.trainModel(prices);
+    const auto future = finalModel.forecast(horizon);
+    if (future.size() != static_cast<size_t>(horizon)) {
+        result.error = "ARIMA could not fit the future forecast model.";
+        return result;
+    }
+    for (double prediction : future) {
+        if (!std::isfinite(prediction) || prediction <= 0) {
+            result.error = "ARIMA returned an invalid future prediction.";
+            return result;
+        }
+        result.mean += prediction / horizon;
+    }
+    result.next = future.front();
+    result.p = finalModel.getBestP();
+    result.ok = true;
+    return result;
+}

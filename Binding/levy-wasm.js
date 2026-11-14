@@ -108,7 +108,16 @@ const LevyWasm = (() => {
     return { ok: true, csv, rows, log: r.output };
   }
 
-  return { init, live, backtest, report, arimaMean, generateForecastCol };
+  // Forecast plus metrics from a separate chronological holdout, in price units.
+  async function arimaReport(prices, nDays = 12) {
+    const M = await init();
+    const v = new M.VectorDouble();
+    try {
+      for (const price of prices) v.push_back(price);
+      return M.forecastWithEvaluation(v, nDays);
+    } finally { v.delete(); }
+  }
+  return { init, live, backtest, report, arimaMean, arimaReport, generateForecastCol };
 })();
 
 /* ---- Wiring into app.js -------------------------------------------------

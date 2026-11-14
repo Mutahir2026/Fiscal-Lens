@@ -66,3 +66,11 @@ private:
     std::vector<double> coeffs;
     std::vector<double> prices; // raw prices (forecast ka starting point)
 };
+// Metrics on the final horizon observations, excluded from fitting and order selection.
+struct ArimaResult {
+    bool ok = false;
+    std::string error;
+    double mean = 0, next = 0, mape = 0, rmse = 0, mae = 0;
+    int p = -1, d = 1, testCount = 0, trainCount = 0, evaluationP = -1;
+};
+ArimaResult forecastWithEvaluation(const std::vector<double>& prices, int horizon);

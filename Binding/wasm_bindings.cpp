@@ -59,6 +59,20 @@ EMSCRIPTEN_BINDINGS(levy_module) {
         .field("code", &RunResult::code)
         .field("output", &RunResult::output);
 
+    emscripten::value_object<ArimaResult>("ArimaResult")
+        .field("ok", &ArimaResult::ok)
+        .field("error", &ArimaResult::error)
+        .field("mean", &ArimaResult::mean)
+        .field("next", &ArimaResult::next)
+        .field("p", &ArimaResult::p)
+        .field("d", &ArimaResult::d)
+        .field("mape", &ArimaResult::mape)
+        .field("rmse", &ArimaResult::rmse)
+        .field("mae", &ArimaResult::mae)
+        .field("testCount", &ArimaResult::testCount)
+        .field("trainCount", &ArimaResult::trainCount)
+        .field("evaluationP", &ArimaResult::evaluationP);
+    emscripten::function("forecastWithEvaluation", &forecastWithEvaluation);
     emscripten::register_vector<double>("VectorDouble");
 
     emscripten::function("runLive", &wasmLive);
