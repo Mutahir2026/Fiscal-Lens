@@ -7,9 +7,9 @@
   <title>Fiscal Lens · Commodity & levy insights</title>
   <link rel="stylesheet" href="styles.css">
   <script>try{var t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
- <script src="levy_wasm.js"></script>
-<script src="levy-wasm.js"></script>
-<script src="app.js"></script>
+ <script src="../Binding/levy_wasm.js" defer></script>
+<script src="../Binding/levy-wasm.js" defer></script>
+<script src="./app.js" defer></script>
 
   <!-- <script src="data.js" defer></script> -->
   <!-- <script src="app.js" defer></script> -->
@@ -41,11 +41,11 @@
       <div class="forecast-workspace">
         <aside class="panel forecast-settings">
           <h3>Forecast settings</h3>
-          <label class="field" for="forecastInput">Input series<select id="forecastInput"><option value="forecast_crude_price">Crude input</option><option value="usd_pkr">USD / PKR</option><option value="retail_petrol_price">Retail petrol</option></select></label>
+          <label class="field" for="forecastInput">Input series<select id="forecastInput"><option value="forecast_crude_price">Crude input</option><option value="usd_pkr">USD / PKR</option><option value="retail_petrol_price" disabled>Retail petrol (insufficient history)</option></select></label>
           <label class="field" for="forecastHorizon">Forecast window<select id="forecastHorizon"><option value="12">Next 12 observations</option><option value="24">Next 24 observations</option></select></label>
           <label class="field" for="window">History window<select id="window"><option value="12">Latest 12 observations</option><option value="24">Latest 24 observations</option><option value="0">All observations</option></select></label>
           <button class="btn" id="runForecast" type="button">Run forecast <span aria-hidden="true">↗</span></button>
-          <p class="small-note forecast-period-note">One observation = one dataset period.</p>
+          <p class="small-note forecast-period-note">Brent and USD / PKR use daily observations. Retail petrol needs at least 250 historical observations plus the forecast window.</p>
         </aside>
         <div class="forecast-stack">
           <div class="panel" id="forecastPanel" aria-busy="false">

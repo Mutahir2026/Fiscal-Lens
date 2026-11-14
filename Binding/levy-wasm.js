@@ -4,13 +4,13 @@
      <script src="levy-wasm.js"></script>
 */
 const LevyWasm = (() => {
-  const BASE_URL = './data/';   // where the browser fetches the CSVs from
+  const BASE_URL = new URL('../data/', document.currentScript.src);   // where the browser fetches the CSVs from
   // [file under BASE_URL, path inside the virtual "data/" folder]
   const DATA_FILES = [
-    ['levy_training.csv',                       'levy_training.csv'],
-    ['brent_daily.csv',                         'processed/brent_daily.csv'],
-    ['petrol_price_buildup_fortnightly.csv',    'raw/petrol_price_buildup_fortnightly.csv'],
-    ['cpi_and_income_monthly.csv',              'raw/cpi_and_income_monthly.csv'],
+    ['processed/levy_training.csv',                       'levy_training.csv'],
+    ['processed/brent_daily.csv',                         'processed/brent_daily.csv'],
+    ['raw/petrol_price_buildup_fortnightly.csv',    'raw/petrol_price_buildup_fortnightly.csv'],
+    ['raw/cpi_and_income_monthly.csv',              'raw/cpi_and_income_monthly.csv'],
   ];
 
   let mod = null, ready = null;
@@ -32,13 +32,16 @@ const LevyWasm = (() => {
       M.FS.mkdirTree('/work');
       M.FS.chdir('/work');
       await Promise.all(DATA_FILES.map(async ([url, name]) => {
-        const r = await fetch(BASE_URL + url);
+        const r = await fetch(new URL(url, BASE_URL));
         if (!r.ok) throw new Error(`Could not load ${BASE_URL + url} (${r.status})`);
         mount(M, name, await r.text());
       }));
       mod = M;
       return M;
-    })();
+    })().catch(error => {
+      ready = null;
+      throw error;
+    });
     return ready;
   }
 
